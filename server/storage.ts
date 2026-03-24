@@ -23,6 +23,55 @@ const dbPath = process.env.DATABASE_PATH || "data.db";
 const sqlite = new Database(dbPath);
 sqlite.pragma("journal_mode = WAL");
 
+// Auto-create tables if they don't exist
+sqlite.exec(`
+  CREATE TABLE IF NOT EXISTS tasks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    notes TEXT,
+    context_note TEXT,
+    priority TEXT NOT NULL DEFAULT 'medium',
+    urgency_score REAL,
+    due_date TEXT,
+    source TEXT NOT NULL DEFAULT 'manual',
+    source_ref TEXT,
+    completed INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS briefings (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    date TEXT NOT NULL,
+    content_email TEXT,
+    content_sms TEXT,
+    delivered_email INTEGER NOT NULL DEFAULT 0,
+    delivered_sms INTEGER NOT NULL DEFAULT 0,
+    created_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS settings (
+    key TEXT PRIMARY KEY,
+    value TEXT
+  );
+  CREATE TABLE IF NOT EXISTS calendar_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    title TEXT NOT NULL,
+    start_time TEXT NOT NULL,
+    end_time TEXT,
+    location TEXT,
+    description TEXT,
+    source TEXT NOT NULL DEFAULT 'manual',
+    source_ref TEXT,
+    color TEXT,
+    created_at TEXT NOT NULL
+  );
+  CREATE TABLE IF NOT EXISTS chat_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    role TEXT NOT NULL,
+    content TEXT NOT NULL,
+    created_at TEXT NOT NULL
+  );
+`);
+
 export const db = drizzle(sqlite);
 
 export interface IStorage {
