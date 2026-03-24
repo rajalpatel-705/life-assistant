@@ -265,9 +265,14 @@ export async function registerRoutes(
 
       // Send via Twilio REST API
       const authHeader = Buffer.from(`${sid}:${token}`).toString("base64");
+      // Use WhatsApp if enabled
+      const useWhatsApp = (await storage.getSetting("useWhatsApp"))?.value === "true";
+      const toNum = useWhatsApp ? `whatsapp:${phone}` : phone;
+      const fromNum = useWhatsApp ? `whatsapp:${twilioPhone}` : twilioPhone;
+
       const params = new URLSearchParams({
-        To: phone,
-        From: twilioPhone,
+        To: toNum,
+        From: fromNum,
         Body: message,
       });
 
@@ -580,10 +585,11 @@ export async function registerRoutes(
 
       if (briefingSmsEnabled?.value === "true" && sid && twilioToken && twilioPhone && userPhone) {
         try {
+          const useWhatsApp = (await storage.getSetting("useWhatsApp"))?.value === "true";
           const authHeader = Buffer.from(`${sid}:${twilioToken}`).toString("base64");
           const params = new URLSearchParams({
-            To: userPhone,
-            From: twilioPhone,
+            To: useWhatsApp ? `whatsapp:${userPhone}` : userPhone,
+            From: useWhatsApp ? `whatsapp:${twilioPhone}` : twilioPhone,
             Body: smsContent,
           });
           const twilioRes = await fetch(
