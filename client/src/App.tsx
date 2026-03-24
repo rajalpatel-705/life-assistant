@@ -54,6 +54,7 @@ function App() {
   return (
     <QueryClientProvider client={queryClient}>
       <TooltipProvider>
+        <Router hook={useHashLocation}>
         <SidebarProvider style={sidebarStyle as React.CSSProperties}>
           <div className="flex h-screen w-full">
             <AppSidebar />
@@ -73,13 +74,12 @@ function App() {
                 </div>
               </header>
               <main className="flex-1 overflow-hidden">
-                <Router hook={useHashLocation}>
                   <AppRouter />
-                </Router>
               </main>
             </div>
           </div>
         </SidebarProvider>
+        </Router>
 
         <ChatPanel open={chatOpen} onClose={() => setChatOpen(false)} />
         <Toaster />
