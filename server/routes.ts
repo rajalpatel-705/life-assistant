@@ -4,6 +4,7 @@ import { storage } from "./storage";
 import { insertTaskSchema, insertCalendarEventSchema } from "@shared/schema";
 import { z } from "zod";
 import crypto from "crypto";
+import cron from "node-cron";
 
 // Bearer token auth middleware for external API access
 async function requireToken(req: Request, res: Response, next: NextFunction) {
@@ -767,6 +768,122 @@ export async function registerRoutes(
       res.status(500).json({ message: "Failed to fetch stats" });
     }
   });
+
+  // Helper to send a WhatsApp/SMS message
+  async function sendMessage(body: string) {
+    const sid = (await storage.getSetting("twilioSid"))?.value;
+    const token = (await storage.getSetting("twilioToken"))?.value;
+    const twilioPhone = (await storage.getSetting("twilioPhone"))?.value;
+    const userPhone = (await storage.getSetting("phoneNumber"))?.value;
+    const useWhatsApp = (await storage.getSetting("useWhatsApp"))?.value === "true";
+
+    if (!sid || !token || !twilioPhone || !userPhone) return;
+
+    const authHeader = Buffer.from(`${sid}:${token}`).toString("base64");
+    const params = new URLSearchParams({
+      To: useWhatsApp ? `whatsapp:${userPhone}` : userPhone,
+      From: useWhatsApp ? `whatsapp:${twilioPhone}` : twilioPhone,
+      Body: body,
+    });
+
+    await fetch(`https://api.twilio.com/2010-04-01/Accounts/${sid}/Messages.json`, {
+      method: "POST",
+      headers: {
+        Authorization: `Basic ${authHeader}`,
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: params.toString(),
+    });
+  }
+
+  // Helper to generate and send briefing
+  async function generateAndSendBriefing() {
+    const pendingTasks = await storage.getPendingTasks();
+    const userName = (await storage.getSetting("userName"))?.value || "";
+    const today = new Date();
+    const todayDate = today.toISOString().split("T")[0];
+    const tomorrowDate = new Date(today.getTime() + 86400000).toISOString().split("T")[0];
+    const overdue = pendingTasks.filter(t => t.dueDate && t.dueDate < todayDate);
+    const dueToday = pendingTasks.filter(t => t.dueDate === todayDate);
+    const dueTomorrow = pendingTasks.filter(t => t.dueDate === tomorrowDate);
+
+    let msg = `Good morning${userName ? ` ${userName}` : ""}! Here's your day:\n\n`;
+
+    if (pendingTasks.length === 0) {
+      msg += "Nothing on the list - enjoy your free day!";
+    } else {
+      if (overdue.length > 0) {
+        msg += `Carry over (${overdue.length}):\n`;
+        overdue.slice(0, 3).forEach((t, i) => { msg += `  ${i + 1}. ${t.title}\n`; });
+        if (overdue.length > 3) msg += `  + ${overdue.length - 3} more\n`;
+        msg += "\n";
+      }
+      if (dueToday.length > 0) {
+        msg += `Today:\n`;
+        dueToday.forEach((t, i) => { msg += `  ${i + 1 + overdue.length}. ${t.title}${t.priority === "high" ? " *" : ""}\n`; });
+        msg += "\n";
+      }
+      if (dueTomorrow.length > 0) {
+        msg += `Tomorrow:\n`;
+        dueTomorrow.slice(0, 3).forEach(t => { msg += `  - ${t.title}\n`; });
+        msg += "\n";
+      }
+      if (overdue.length === 0 && dueToday.length === 0 && dueTomorrow.length === 0) {
+        const top = pendingTasks.slice(0, 5);
+        top.forEach((t, i) => { msg += `${i + 1}. ${t.title}${t.priority === "high" ? " *" : ""}\n`; });
+        if (pendingTasks.length > 5) msg += `\n+ ${pendingTasks.length - 5} more on your list`;
+      }
+      msg += `\n${pendingTasks.length} total tasks. Reply "done #" to check one off!`;
+    }
+
+    await sendMessage(msg);
+    console.log("Scheduled briefing sent");
+  }
+
+  // Helper to send afternoon check-in
+  async function sendAfternoonCheckIn() {
+    const pendingTasks = await storage.getPendingTasks();
+    const userName = (await storage.getSetting("userName"))?.value || "";
+    const todayDate = new Date().toISOString().split("T")[0];
+    const dueToday = pendingTasks.filter(t => t.dueDate === todayDate);
+    const highPriority = pendingTasks.filter(t => t.priority === "high");
+
+    let msg = `Hey${userName ? ` ${userName}` : ""}! Afternoon check-in:\n\n`;
+
+    if (pendingTasks.length === 0) {
+      msg += "You're all caught up! Nothing pending.";
+    } else {
+      if (dueToday.length > 0) {
+        const incomplete = dueToday.filter(t => !t.completed);
+        if (incomplete.length > 0) {
+          msg += `Still due today:\n`;
+          incomplete.forEach((t, i) => { msg += `  ${i + 1}. ${t.title}\n`; });
+          msg += "\n";
+        }
+      }
+      if (highPriority.length > 0) {
+        msg += `High priority:\n`;
+        highPriority.slice(0, 3).forEach(t => { msg += `  - ${t.title}\n`; });
+        msg += "\n";
+      }
+      msg += `${pendingTasks.length} tasks remaining. You got this! 💪`;
+    }
+
+    await sendMessage(msg);
+    console.log("Afternoon check-in sent");
+  }
+
+  // Schedule morning briefing at 8:30 AM Central Time
+  cron.schedule("30 8 * * *", generateAndSendBriefing, {
+    timezone: "America/Chicago",
+  });
+
+  // Schedule afternoon check-in at 3:00 PM Central Time
+  cron.schedule("0 15 * * *", sendAfternoonCheckIn, {
+    timezone: "America/Chicago",
+  });
+
+  console.log("Scheduled: morning briefing at 8:30 AM CT, afternoon check-in at 3:00 PM CT");
 
   return httpServer;
 }
